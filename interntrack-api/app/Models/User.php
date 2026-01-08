@@ -28,6 +28,7 @@ class User extends Authenticatable
         'mname',
         'lname',
         'email',
+        'webmail',
         'contact_number',
         'course',
         'year',
