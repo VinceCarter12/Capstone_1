@@ -107,6 +107,7 @@ class AttendanceController extends Controller
             'selfie' => 'required|image|mimes:jpeg,jpg,png|max:5120', // 5MB max
             'recorded_at' => 'nullable|date', // For offline sync
             'synced_offline' => 'nullable|boolean',
+            'notes' => 'nullable|string|max:500',
         ]);
 
         // Check if user is assigned to a company
@@ -195,6 +196,7 @@ class AttendanceController extends Controller
             'geofence_id' => $validGeofence->id,
             'distance_meters' => round($minDistance, 2),
             'synced_offline' => $validated['synced_offline'] ?? false,
+            'notes' => $validated['notes'] ?? null,
         ]);
 
         $typeLabel = $type === Attendance::TYPE_CLOCK_IN ? 'Clock In' : 'Clock Out';
@@ -230,7 +232,8 @@ class AttendanceController extends Controller
         
         $path = "attendance_selfies/{$userId}/{$date}";
         
-        return $file->storeAs($path, $filename, 'public');
+        // Use the default disk configured in FILESYSTEM_DISK
+        return $file->storeAs($path, $filename);
     }
 
     /**
@@ -250,17 +253,32 @@ class AttendanceController extends Controller
 
         $clockIn = $todayAttendances->firstWhere('type', Attendance::TYPE_CLOCK_IN);
         $clockOut = $todayAttendances->firstWhere('type', Attendance::TYPE_CLOCK_OUT);
+        $breakIn = $todayAttendances->firstWhere('type', Attendance::TYPE_BREAK_IN);
+        $breakOut = $todayAttendances->firstWhere('type', Attendance::TYPE_BREAK_OUT);
 
         // Calculate working hours if both clock in and out exist
         $workingMinutes = null;
+        $breakMinutes = null;
+        
         if ($clockIn && $clockOut) {
             $workingMinutes = $clockIn->recorded_at->diffInMinutes($clockOut->recorded_at);
+        }
+        
+        // Calculate break time if both break in and out exist
+        if ($breakIn && $breakOut) {
+            $breakMinutes = $breakIn->recorded_at->diffInMinutes($breakOut->recorded_at);
+            // Subtract break time from working hours
+            if ($workingMinutes !== null) {
+                $workingMinutes -= $breakMinutes;
+            }
         }
 
         return response()->json([
             'date' => now()->toDateString(),
             'has_clocked_in' => $clockIn !== null,
             'has_clocked_out' => $clockOut !== null,
+            'has_break_in' => $breakIn !== null,
+            'has_break_out' => $breakOut !== null,
             'clock_in' => $clockIn ? [
                 'id' => $clockIn->id,
                 'recorded_at' => $clockIn->recorded_at->toIso8601String(),
@@ -271,6 +289,17 @@ class AttendanceController extends Controller
                 'recorded_at' => $clockOut->recorded_at->toIso8601String(),
                 'selfie_url' => $clockOut->selfie_url,
             ] : null,
+            'break_in' => $breakIn ? [
+                'id' => $breakIn->id,
+                'recorded_at' => $breakIn->recorded_at->toIso8601String(),
+                'selfie_url' => $breakIn->selfie_url,
+            ] : null,
+            'break_out' => $breakOut ? [
+                'id' => $breakOut->id,
+                'recorded_at' => $breakOut->recorded_at->toIso8601String(),
+                'selfie_url' => $breakOut->selfie_url,
+            ] : null,
+            'break_minutes' => $breakMinutes,
             'working_minutes' => $workingMinutes,
             'working_hours_formatted' => $workingMinutes 
                 ? sprintf('%02d:%02d', floor($workingMinutes / 60), $workingMinutes % 60)
